@@ -25,6 +25,8 @@ namespace Azure.Functions.Cli.Actions.LocalActions
 
         public bool InitSample { get; set; }
 
+        public bool Python { get; set; }
+
         public string FolderName { get; set; } = string.Empty;
 
         internal readonly Dictionary<Lazy<string>, string> fileToContentMap = new Dictionary<Lazy<string>, string>
@@ -90,6 +92,12 @@ local.settings.json
                 .WithDescription("")
                 .Callback(s => InitSample = s);
 
+            Parser
+                .Setup<bool>("python")
+                .SetDefault(false)
+                .WithDescription("")
+                .Callback(p => Python = p);
+
             if (args.Any() && !args.First().StartsWith("-"))
             {
                 FolderName = args.First();
@@ -117,6 +125,7 @@ local.settings.json
             await SetupSourceControl();
             await WriteDockerfile();
             await WriteSample();
+            await WriteLanguageFiles();
             PostInit();
         }
 
@@ -229,6 +238,45 @@ COPY . /home/site/wwwroot";
         ""ms-azuretools.vscode-azurefunctions""
     ]
 }");
+        }
+
+        private async Task WriteLanguageFiles()
+        {
+            await WriteFiles(Path.Combine("HttpTrigger", "function.json"), @"{
+  ""scriptFile"": ""main.py"",
+  ""disabled"": false,
+  ""bindings"": [
+    {
+      ""authLevel"": ""anonymous"",
+      ""type"": ""httpTrigger"",
+      ""direction"": ""in"",
+      ""name"": ""req""
+    },
+    {
+      ""type"": ""http"",
+      ""direction"": ""out"",
+      ""name"": ""$return""
+    }
+  ]
+}");
+            await WriteFiles(Path.Combine("HttpTrigger", "main.py"), @"import azure.functions
+
+def main(req: azure.functions.HttpRequest) -> str:
+    user = req.params.get('user', 'User')
+    return f'Hello, {user}!'");
+
+            await WriteFiles("requirements.txt", @"requests");
+
+            await WriteFiles("Dockerfile", @"ARG NAMESPACE=microsoft
+FROM ${NAMESPACE}/azure-functions-python3.6:dev-stretch
+
+COPY . /home/site/wwwroot
+
+RUN cd /home/site/wwwroot && \
+    /bin/bash -c \
+    ""source /workers/worker_env/bin/activate &&\
+    pip3 install -r requirements.txt""
+");
         }
 
         private async Task SetupSourceControl()
