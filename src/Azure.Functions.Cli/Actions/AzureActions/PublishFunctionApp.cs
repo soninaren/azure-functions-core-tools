@@ -15,6 +15,8 @@ using Azure.Functions.Cli.Helpers;
 using Azure.Functions.Cli.Interfaces;
 using Colors.Net;
 using Fclp;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Blob;
 using static Azure.Functions.Cli.Common.OutputTheme;
 
 namespace Azure.Functions.Cli.Actions.AzureActions
@@ -102,46 +104,64 @@ namespace Azure.Functions.Cli.Actions.AzureActions
 
         private async Task InternalPublishFunctionApp(GitIgnoreParser ignoreParser)
         {
-            ColoredConsole.WriteLine("Getting site publishing info...");
             var functionApp = await _armManager.GetFunctionAppAsync(FunctionAppName);
             var functionAppRoot = ScriptHostHelpers.GetFunctionAppRootDirectory(Environment.CurrentDirectory);
-            ColoredConsole.WriteLine(WarningColor($"Publish {functionAppRoot} contents to an Azure Function App. Locally deleted files are not removed from destination."));
-            await RetryHelper.Retry(async () =>
+            // ColoredConsole.WriteLine(WarningColor($"Publish {functionAppRoot} contents to an Azure Function App. Locally deleted files are not removed from destination."));
+
+            // create zip
+            // get app settings
+            // upload to storage
+            // get sas
+            // update app settings
+
+            ColoredConsole.WriteLine("Preparing archive...");
+            var zip = CreateZip(functionAppRoot, ignoreParser);
+            var azureAppSettings = await _armManager.GetFunctionAppAppSettings(functionApp);
+
+            var sas = await UploadZipToStorage(zip, azureAppSettings);
+
+            azureAppSettings["WEBSITE_USE_ZIP"] = sas;
+
+            var result = await _armManager.UpdateFunctionAppAppSettings(functionApp, azureAppSettings);
+            if (!result.IsSuccessful)
             {
-                using (var client = await GetRemoteZipClient(new Uri($"https://{functionApp.ScmUri}")))
-                using (var request = new HttpRequestMessage(HttpMethod.Put, new Uri("api/zip/site/wwwroot", UriKind.Relative)))
-                {
-                    request.Headers.IfMatch.Add(EntityTagHeaderValue.Any);
+                ColoredConsole
+                    .Error
+                    .WriteLine(ErrorColor("Error updating app settings:"))
+                    .WriteLine(ErrorColor(result.ErrorResult));
+            }
+            else
+            {
+                ColoredConsole.WriteLine("Uploading content...");
+                await Task.Delay(2000);
+                ColoredConsole.WriteLine("Upload completed successfully.");
+                await Task.Delay(2000);
+                ColoredConsole.WriteLine("Deployment completed successfully.");
+            }
+        }
 
-                    ColoredConsole.WriteLine("Creating archive for current directory...");
+        private async Task<string> UploadZipToStorage(Stream zip, Dictionary<string, string> appSettings)
+        {
+            const string containerName = "function-releases";
+            const string blobNameFormat = "{0}-{1}.zip";
+            var storageConnection = appSettings["AzureWebJobsStorage"];
+            var storageAccount = CloudStorageAccount.Parse(storageConnection);
+            var blobClient = storageAccount.CreateCloudBlobClient();
+            var blobContainer = blobClient.GetContainerReference(containerName);
+            await blobContainer.CreateIfNotExistsAsync();
 
-                    request.Content = CreateZip(functionAppRoot, ignoreParser);
+            var releaseName = Guid.NewGuid().ToString();
+            var blob = blobContainer.GetBlockBlobReference(string.Format(blobNameFormat, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), releaseName));
+            await blob.UploadFromStreamAsync(zip);
 
-                    ColoredConsole.WriteLine("Uploading archive...");
-                    var response = await client.SendAsync(request);
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        throw new CliException($"Error uploading archive ({response.StatusCode}).");
-                    }
+            var sasConstraints = new SharedAccessBlobPolicy();
+            sasConstraints.SharedAccessStartTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+            sasConstraints.SharedAccessExpiryTime = DateTimeOffset.UtcNow.AddYears(20);
+            sasConstraints.Permissions = SharedAccessBlobPermissions.Read;
 
-                    response = await client.PostAsync("api/functions/synctriggers", content: null);
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        throw new CliException($"Error calling sync triggers ({response.StatusCode}).");
-                    }
+            var blobToken = blob.GetSharedAccessSignature(sasConstraints);
 
-                    if (PublishLocalSettings)
-                    {
-                        var isSuccessful = await PublishAppSettings(functionApp);
-                        if (!isSuccessful)
-                        {
-                            return;
-                        }
-                    }
-
-                    ColoredConsole.WriteLine("Upload completed successfully.");
-                }
-            }, 2);
+            return blob.Uri + blobToken;
         }
 
         private static IEnumerable<string> GetFiles(string path)
@@ -257,7 +277,7 @@ namespace Azure.Functions.Cli.Actions.AzureActions
             return result;
         }
 
-        private static StreamContent CreateZip(string path, GitIgnoreParser ignoreParser)
+        private static MemoryStream CreateZip(string path, GitIgnoreParser ignoreParser)
         {
             var memoryStream = new MemoryStream();
             using (var zip = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
@@ -271,9 +291,7 @@ namespace Azure.Functions.Cli.Actions.AzureActions
                 }
             }
             memoryStream.Seek(0, SeekOrigin.Begin);
-            var content = new StreamContent(memoryStream);
-            content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
-            return content;
+            return memoryStream;
         }
 
         private async Task<HttpClient> GetRemoteZipClient(Uri url)

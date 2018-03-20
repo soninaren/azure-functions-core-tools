@@ -242,6 +242,9 @@ COPY . /home/site/wwwroot";
 
         private async Task WriteLanguageFiles()
         {
+            if (!Python) return;
+            FileSystemHelpers.EnsureDirectory("HttpTrigger");
+
             await WriteFiles(Path.Combine("HttpTrigger", "function.json"), @"{
   ""scriptFile"": ""main.py"",
   ""disabled"": false,
@@ -267,7 +270,7 @@ def main(req: azure.functions.HttpRequest) -> str:
 
             await WriteFiles("requirements.txt", @"requests");
 
-            await WriteFiles("Dockerfile", @"ARG NAMESPACE=microsoft
+            await WriteFiles("Dockerfile", @"ARG NAMESPACE=local
 FROM ${NAMESPACE}/azure-functions-python3.6:dev-stretch
 
 COPY . /home/site/wwwroot
