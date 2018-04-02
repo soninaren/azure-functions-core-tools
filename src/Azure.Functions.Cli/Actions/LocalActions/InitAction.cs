@@ -23,13 +23,14 @@ namespace Azure.Functions.Cli.Actions.LocalActions
 
         public bool InitDocker { get; set; }
 
+        public string Language { get; set; }
+
         public string FolderName { get; set; } = string.Empty;
 
         internal readonly Dictionary<Lazy<string>, Task<string>> fileToContentMap = new Dictionary<Lazy<string>, Task<string>>
         {
             { new Lazy<string>(() => ".gitignore"), StaticResources.GitIgnore },
             { new Lazy<string>(() => ScriptConstants.HostMetadataFileName), StaticResources.HostJson },
-            { new Lazy<string>(() => SecretsManager.AppSettingsFileName), StaticResources.LocalSettingsJson }
         };
 
         private readonly ITemplatesManager _templatesManager;
@@ -53,6 +54,12 @@ namespace Azure.Functions.Cli.Actions.LocalActions
                  .WithDescription("")
                  .Callback(d => InitDocker = d);
 
+            Parser
+                .Setup<string>('l', "language")
+                .SetDefault(string.Empty)
+                .WithDescription("")
+                .Callback(l => Language = l);
+
             if (args.Any() && !args.First().StartsWith("-"))
             {
                 FolderName = args.First();
@@ -74,6 +81,9 @@ namespace Azure.Functions.Cli.Actions.LocalActions
                 FileSystemHelpers.EnsureDirectory(folderPath);
                 Environment.CurrentDirectory = folderPath;
             }
+
+            var language = Language ?? SelectionMenuHelper.DisplaySelectionWizard(new[] { "C#", "JavaScript", "Python", "Java" });
+            ColoredConsole.WriteLine(TitleColor(language));
 
             await WriteFiles();
             await WriteExtensionsJson();
