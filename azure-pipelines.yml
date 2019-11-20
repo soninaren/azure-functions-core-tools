@@ -31,6 +31,8 @@ steps:
     versionSpec: 
 - pwsh: |
     .\build.ps1
+  errorActionPreference: 'continue'
+  ignoreLASTEXITCODE: true
   env:
     AzureBlobSigningConnectionString: $(AzureBlobSigningConnectionString)
     BuildArtifactsStorage: $(BuildArtifactsStorage)
