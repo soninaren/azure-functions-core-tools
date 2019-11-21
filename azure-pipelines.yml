@@ -3,14 +3,12 @@ name: $(Build.SourceBranchName)_$(Build.Reason)_$(devops_buildNumber)
 pr:
   branches:
     include:
-    - master
-    - dev
+    - testPublish
 
 trigger:
   branches:
     include:
-    - dev
-    - master
+    - testPublish
 
 pool:
   vmImage: 'vs2017-win2016'
@@ -21,36 +19,8 @@ variables:
   APPVEYOR_REPO_COMMIT: $(Build.SourceVersion)
 
 steps:
-- pwsh: |
-    Write-Host "Target branch: '$(APPVEYOR_REPO_BRANCH)'"
-- task: NodeTool@0 
-  inputs:
-    versionSpec: '10.x'
-- task: NuGetToolInstaller@1
-  inputs:
-    versionSpec: 
-- pwsh: |
-    .\build.ps1
-  errorActionPreference: 'continue'
-  ignoreLASTEXITCODE: true
-  env:
-    AzureBlobSigningConnectionString: $(AzureBlobSigningConnectionString)
-    BuildArtifactsStorage: $(BuildArtifactsStorage)
-    DURABLE_STORAGE_CONNECTION: $(DURABLE_STORAGE_CONNECTION)
-  displayName: 'Executing build script'
 - task: PublishTestResults@2
   inputs:
     testResultsFormat: 'XUnit'
     testResultsFiles: '**/*.trx'
     failTaskOnFailedTests: true
-- task: CopyFiles@2
-  inputs:
-    SourceFolder: '$(Build.Repository.LocalPath)\artifacts'
-    Contents: 'Azure.Functions.Cli.*'
-    TargetFolder: '$(Build.ArtifactStagingDirectory)'
-    CleanTargetFolder: true
-- task: PublishBuildArtifacts@1
-  inputs:
-    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-    ArtifactName: 'drop'
-    publishLocation: 'Container'
